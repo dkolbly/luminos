@@ -31,8 +31,8 @@ import (
 	"log"
 	"menteslibres.net/gosexy/to"
 	"menteslibres.net/gosexy/yaml"
-	"menteslibres.net/luminos/page"
-	"menteslibres.net/luminos/watcher"
+	"github.com/dkolbly/luminos/page"
+	"github.com/dkolbly/luminos/watcher"
 	"net/http"
 	"os"
 	"path"
@@ -285,8 +285,6 @@ func (host *Host) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		docroot := host.DocumentRoot + PS + docrootdir
 
 		testFile := docroot + PS + reqpath
-
-		stat, err = os.Stat(testFile)
 
 		localFile, stat = guessFile(testFile, true)
 
