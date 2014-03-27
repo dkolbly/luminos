@@ -30,6 +30,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"fmt"
 )
 
 // This structure holds information on the current document served by Luminos.
@@ -133,6 +134,8 @@ func filterList(directory string, filter func(os.FileInfo) bool) fileList {
 	}
 
 	for _, file := range ls {
+		fmt.Printf("Considering >>[%s]\n", file.Name())
+
 		if filter(file) == true {
 			list = append(list, file)
 		}
@@ -143,14 +146,6 @@ func filterList(directory string, filter func(os.FileInfo) bool) fileList {
 	return list
 }
 
-// A filter for filterList. Returns all except for those that begin with "." or "_".
-func dummyFilter(f os.FileInfo) bool {
-	if strings.HasPrefix(f.Name(), ".") == false && strings.HasPrefix(f.Name(), "_") == false {
-		return true
-	}
-	return false
-}
-
 // A filter for filterList. Returns all directories except those that begin with "." or "_".
 func directoryFilter(f os.FileInfo) bool {
 	if strings.HasPrefix(f.Name(), ".") == false && strings.HasPrefix(f.Name(), "_") == false {
@@ -159,12 +154,22 @@ func directoryFilter(f os.FileInfo) bool {
 	return false
 }
 
-// A filter for filterList. Returns all files except for those that begin with "." or "_".
-func fileFilter(f os.FileInfo) bool {
-	if strings.HasPrefix(f.Name(), ".") == false && strings.HasPrefix(f.Name(), "_") == false {
-		return (f.IsDir() == false)
+// A filter for filterList. Returns all files except for those that 
+// begin with "." or "_", or end with "~" (applies to directory names, too,
+// unlike the original luminos)
+
+func mdFilter(f os.FileInfo) bool {
+	n := f.Name()
+	if strings.HasPrefix(n, ".") {
+		return false
 	}
-	return false
+	if strings.HasPrefix(n, "_") {
+		return false
+	}
+	if !strings.HasSuffix(n, ".md") {
+		return false
+	}
+	return true
 }
 
 // Returns a stylized human title, given a file name.
@@ -196,14 +201,20 @@ func (p *Page) CreateMenu() {
 	var item map[string]interface{}
 	p.Menu = []map[string]interface{}{}
 
+	fmt.Printf("Creating menu...\n")
 	files := filterList(p.FileDir, directoryFilter)
+	fmt.Printf("done building files (%d entries)\n", len(files))
 
 	for _, file := range files {
 		item = p.CreateLink(file, p.BasePath)
-		children := filterList(p.FileDir+PS+file.Name(), directoryFilter)
+		fmt.Printf("Considering [%s]\n", p.FileDir+PS+file.Name())
+		children := filterList(p.FileDir+PS+file.Name(), 
+			directoryFilter)
+		fmt.Printf("   found %d children\n", len(children))
 		if len(children) > 0 {
 			item["children"] = []map[string]interface{}{}
 			for _, child := range children {
+				fmt.Printf("   matched [%s]\n", child)
 				childItem := p.CreateLink(child, p.BasePath+file.Name()+"/")
 				item["children"] = append(item["children"].([]map[string]interface{}), childItem)
 			}
@@ -244,7 +255,9 @@ func (p *Page) CreateSideMenu() {
 	var item map[string]interface{}
 	p.SideMenu = []map[string]interface{}{}
 
-	files := filterList(p.FileDir, dummyFilter)
+	fmt.Printf("Creating side menu\n");
+	files := filterList(p.FileDir, mdFilter)
+	fmt.Printf("   done with %d entries\n", len(files));
 
 	for _, file := range files {
 		item = p.CreateLink(file, p.BasePath)

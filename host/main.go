@@ -153,6 +153,58 @@ func (host *Host) link(url, text string) template.HTML {
 	return template.HTML(fmt.Sprintf(`<a href="%s">%s</a>`, host.asset(url), text))
 }
 
+// Checks for files that could be transformed into the requested file
+
+const (
+	NO_TRANSFORM = iota
+	MARKDOWN_TRANSFORM = iota
+	REDIRECT_TRANSFORM = iota
+)
+
+func guessFileTransform(file string) (string, int) {
+	if strings.HasSuffix(file, "/") {
+		fmt.Printf("Trailing slash... [%s]\n", file)
+		// They specified the trailing '/'
+		actualpath := file + "/index.md"
+		_, err := os.Stat(actualpath)
+		if err == nil {
+			fmt.Printf(" it's a hit... [%s]\n", actualpath)
+			return actualpath, MARKDOWN_TRANSFORM
+		}
+		return file, NO_TRANSFORM
+	}
+	// no trailing "/" in the request
+	stat, err := os.Stat(file)
+	if err == nil {
+		fmt.Printf("No trailing slash... [%s]\n", file)
+		if stat.IsDir() {
+			// check to see if there is an index there,
+			// if so we want to redirect them to the proper "/"
+			// (note that the main reason we don't
+			// want to denote directories without the trailing
+			// slash is the interpretation of relative references
+			// within the directory's index.md, like an image ref)
+			actualpath := file + "/index.md"
+			_, err = os.Stat(actualpath)
+			if err == nil {
+				return file + "/", REDIRECT_TRANSFORM
+			}
+			// well, the name exists and it is a directory,
+			// but there is no index.md in it... we don't
+			// support "native" index listing, so tough luck
+			return file, NO_TRANSFORM
+		}
+	}
+	
+	actualpath := file + ".md"
+	_, err = os.Stat(actualpath)
+	if err == nil {
+		return actualpath, MARKDOWN_TRANSFORM
+	}
+	return actualpath, NO_TRANSFORM
+}
+
+
 // Checks for files names and returns a guessed name.
 func guessFile(file string, descend bool) (string, os.FileInfo) {
 	stat, err := os.Stat(file)
@@ -240,7 +292,7 @@ func (host *Host) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	size := -1
 
 	// Requested path
-	reqpath := strings.Trim(req.URL.Path, "/")
+	reqpath := req.URL.Path
 
 	// Stripping path
 	index := len(host.Path)
@@ -248,8 +300,6 @@ func (host *Host) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if reqpath[0:index] == host.Path {
 		reqpath = reqpath[index:]
 	}
-
-	reqpath = strings.Trim(reqpath, "/")
 
 	// Trying to match a file on webroot/
 	webrootdir := to.String(host.Settings.Get("document", "webroot"))
@@ -275,51 +325,34 @@ func (host *Host) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if status == http.StatusNotFound {
+		// Check for a corresponding .md file
 
-		docrootdir := to.String(host.Settings.Get("document", "markdown"))
+		localFile, transform := guessFileTransform(localFile)
 
-		if docrootdir == "" {
-			docrootdir = "markdown"
-		}
+		switch transform {
+		case NO_TRANSFORM:
+			break
 
-		docroot := host.DocumentRoot + PS + docrootdir
-
-		testFile := docroot + PS + reqpath
-
-		localFile, stat = guessFile(testFile, true)
-
-		if stat != nil {
-
-			if reqpath != "" {
-				if stat.IsDir() == false {
-					if strings.HasSuffix(req.URL.Path, "/") == true {
-						http.Redirect(w, req, "/"+host.Path+"/"+reqpath, 301)
-						w.Write([]byte(http.StatusText(301)))
-						return
-					}
-				} else {
-					if strings.HasSuffix(req.URL.Path, "/") == false {
-						http.Redirect(w, req, req.URL.Path+"/", 301)
-						w.Write([]byte(http.StatusText(301)))
-						return
-					}
-				}
-			}
-
+		case REDIRECT_TRANSFORM:
+			http.Redirect(w, req, "/"+host.Path+"/"+reqpath+"/", 301)
+			w.Write([]byte(http.StatusText(301)))
+			return
+			
+		case MARKDOWN_TRANSFORM:
+			fmt.Printf("reqpath = [%s] local = [%s]\n", 
+				reqpath,
+				localFile);
+			
 			p := &page.Page{}
 
 			p.FilePath = localFile
 			p.BasePath = req.URL.Path
 
-			relPath := localFile[len(docroot):]
-
-			if stat.IsDir() == false {
-				p.FileDir = path.Dir(localFile)
-				p.BasePath = path.Dir(relPath)
-			} else {
-				p.FileDir = localFile
-				p.BasePath = relPath
-			}
+			relPath := localFile[len(webroot):]
+			fmt.Printf("   relPath = [%s]\n", relPath)
+			
+			p.FileDir = path.Dir(localFile)
+			p.BasePath = path.Dir(relPath)
 
 			content, err := host.readFile(localFile)
 
